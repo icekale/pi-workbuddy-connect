@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const authDir = join(tmpdir(), `workbuddy-session-start-${process.pid}`);
 await mkdir(authDir, { recursive: true });
+// intl cred only; the cn edition has no cred here and must still not block.
 await writeFile(join(authDir, ".workbuddy-auth.json"), JSON.stringify({
   version: 1,
   credential: {
@@ -27,16 +28,19 @@ const pi: any = {
   registerCommand: () => {},
 };
 await ext.default(pi);
-const start = handlers.session_start?.[0];
-if (!start) throw new Error("no session_start handler");
+
+const starts = handlers.session_start ?? [];
+if (starts.length !== 2) throw new Error(`expected 2 session_start handlers (both editions), got ${starts.length}`);
 
 const ui = { setWidget() {}, setStatus() {}, notify() {} };
-const result = await Promise.race([
-  start({}, { model: { provider: "workbuddy" }, ui }),
-  new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol.for("timed-out")), 100)),
-]);
-globalThis.fetch = originalFetch;
-if (result === Symbol.for("timed-out")) {
-  throw new Error("session_start is blocked by the WorkBuddy network request");
+for (const [i, start] of starts.entries()) {
+  const result = await Promise.race([
+    start({}, { model: { provider: i === 0 ? "workbuddy" : "codebuddy" }, ui }),
+    new Promise<symbol>((resolve) => setTimeout(() => resolve(Symbol.for("timed-out")), 100)),
+  ]);
+  if (result === Symbol.for("timed-out")) {
+    throw new Error(`session_start handler ${i} is blocked by a network request`);
+  }
 }
-console.log("OK: session_start returns without waiting for WorkBuddy network");
+globalThis.fetch = originalFetch;
+console.log("OK: both editions' session_start return without waiting for network");
